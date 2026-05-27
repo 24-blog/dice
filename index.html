@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日本の人口動態と社会保障費</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;700&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0e0f; --surface: #16161a; --border: #2a2a30;
+    --gold: #c9a84c; --gold-dim: #7a6230;
+    --male: #4a90c4; --female: #c4607a; --cost: #e87b3a;
+    --text: #d4cfc5; --text-dim: #6b6860; --axis: #3a3a42;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Noto Serif JP',serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:24px 16px; }
+  header { text-align:center; margin-bottom:20px; }
+  header h1 { font-size:clamp(14px,2vw,18px); font-weight:300; color:var(--gold);
+    letter-spacing:0.2em; margin-bottom:4px; }
+  header p { font-family:'DM Mono',monospace; font-size:11px; color:var(--text-dim); letter-spacing:0.1em; }
+  .year-display { font-family:'DM Mono',monospace; font-size:clamp(40px,8vw,72px); font-weight:300;
+    color:var(--gold); text-align:center; letter-spacing:0.05em; line-height:1;
+    margin-bottom:4px; transition:color 0.3s; }
+  .charts-row { display:flex; flex-direction:column; gap:16px; width:100%; max-width:680px; }
+  .chart-box { background:var(--surface); border:1px solid var(--border); border-radius:4px;
+    padding:16px; position:relative; width:100%; }
+  .chart-title { font-size:11px; font-weight:400; color:var(--text-dim); letter-spacing:0.15em;
+    text-transform:uppercase; margin-bottom:12px; font-family:'DM Mono',monospace; }
+  canvas { display:block; }
+  .legend { display:flex; gap:20px; margin-top:8px; justify-content:center; }
+  .legend-item { display:flex; align-items:center; gap:6px; font-family:'DM Mono',monospace;
+    font-size:11px; color:var(--text-dim); }
+  .legend-dot { width:10px; height:10px; border-radius:50%; }
+  .controls { display:flex; align-items:center; gap:16px; margin-top:18px; }
+  button { background:none; border:1px solid var(--gold-dim); color:var(--gold);
+    font-family:'DM Mono',monospace; font-size:12px; padding:8px 20px; border-radius:2px;
+    cursor:pointer; letter-spacing:0.1em; transition:all 0.2s; }
+  button:hover { background:rgba(201,168,76,0.08); border-color:var(--gold); }
+  .speed-label { font-family:'DM Mono',monospace; font-size:11px; color:var(--text-dim); }
+  input[type=range] { -webkit-appearance:none; width:100px; height:2px;
+    background:var(--border); outline:none; border-radius:1px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px;
+    border-radius:50%; background:var(--gold); cursor:pointer; }
+  .stat-strip { display:flex; gap:24px; margin-top:14px; flex-wrap:wrap; justify-content:center; }
+  .stat { text-align:center; }
+  .stat-val { font-family:'DM Mono',monospace; font-size:18px; color:var(--gold); font-weight:400; }
+  .stat-lbl { font-size:10px; color:var(--text-dim); letter-spacing:0.1em; margin-top:2px; }
+  .gold-line { width:40px; height:1px; background:var(--gold-dim); margin:10px auto 14px; }
+  .data-note { font-family:'DM Mono',monospace; font-size:9px; color:var(--text-dim);
+    text-align:center; margin-top:12px; opacity:0.6; letter-spacing:0.05em; line-height:1.6; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>日本の人口動態と社会保障費の乖離構造</h1>
+  <p>1970–2045 / demographic inversion & cost escalation</p>
+</header>
+
+<div class="year-display" id="yearDisplay">1970</div>
+<div class="gold-line"></div>
+
+<div class="stat-strip">
+  <div class="stat"><div class="stat-val" id="statCost">—</div><div class="stat-lbl">社会保障費（兆円）</div></div>
+  <div class="stat"><div class="stat-val" id="statOld">—</div><div class="stat-lbl">高齢化率（65歳以上）</div></div>
+  <div class="stat"><div class="stat-val" id="statRatio">—</div><div class="stat-lbl">高齢者/生産年齢 比</div></div>
+</div>
+
+<div style="height:12px"></div>
+
+<div class="charts-row">
+  <div class="chart-box pyramid">
+    <div class="chart-title">人口ピラミッド — Population Pyramid</div>
+    <canvas id="pyrCanvas"></canvas>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--male)"></div>男性</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--female)"></div>女性</div>
+    </div>
+  </div>
+  <div class="chart-box cost">
+    <div class="chart-title">社会保障給付費推移 — Cost Trend</div>
+    <canvas id="costCanvas"></canvas>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="playBtn">▶ PLAY</button>
+  <button id="resetBtn">↺ RESET</button>
+  <span class="speed-label">速度</span>
+  <input type="range" id="speedSlider" min="1" max="10" value="4">
+</div>
+
+<div class="data-note">
+  人口：総務省「国勢調査」(1970–2020) / 社人研「将来推計人口 令和5年推計」(2025–2045) 出生中位・死亡中位<br>
+  社会保障費：社人研「社会保障費用統計」実績値 / 2025年以降は財政制度審議会資料ベース補間
+</div>
+
+<script>
+const YEARS = [1970,1975,1980,1985,1990,1995,2000,2005,2010,2015,2020,2025,2030,2035,2040,2045];
+const N = YEARS.length;
+
+// 年齢グループ（5歳階級, 0-4〜85+）
+const AGE_GROUPS = [
+  '0–4','5–9','10–14','15–19','20–24','25–29','30–34','35–39',
+  '40–44','45–49','50–54','55–59','60–64','65–69','70–74','75–79','80–84','85+'
+];
+const A = 18;
+
+// 男性人口 [年次][年齢階級] 万人
+// 1970・1975: 昭和45・50年国勢調査準拠推定値
+// 1980–2020: 総務省国勢調査実績（e-Stat）
+// 2025–2045: 社人研「日本の将来推計人口（令和5年4月推計）」出生中位・死亡中位
+const popM = [
+  [453,507,532,492,430,398,382,381,384,357,311,253,196,173,131,82,40,17],
+  [390,452,508,532,462,399,377,365,366,371,342,298,238,179,139,93,49,24],
+  [437,514,459,422,396,455,542,459,416,403,355,251,195,174,132,85,42,17],
+  [382,437,515,460,417,395,456,540,455,409,393,341,238,178,150,102,54,26],
+  [333,382,437,512,447,408,393,452,535,448,400,378,324,219,156,120,68,36],
+  [307,335,383,439,504,445,411,395,453,533,442,391,361,300,194,126,82,46],
+  [302,308,335,383,431,497,444,410,393,447,521,429,375,336,267,163,92,65],
+  [285,304,308,337,375,420,493,440,407,387,438,508,415,355,304,226,122,81],
+  [271,286,303,311,327,369,422,495,440,403,381,429,492,392,323,258,169,105],
+  [255,271,287,309,305,326,368,420,491,435,397,373,415,466,358,279,199,146],
+  [243,256,273,289,316,317,334,374,424,478,432,380,347,371,417,321,245,174],
+  [221,243,257,273,290,316,317,334,373,423,476,430,376,343,369,413,315,228],
+  [212,221,243,257,274,290,316,317,333,372,421,474,427,373,340,366,410,294],
+  [205,213,222,243,258,274,291,316,318,333,371,419,471,424,370,337,364,382],
+  [195,205,213,222,243,258,275,291,316,318,332,370,417,468,421,367,334,389],
+  [184,195,205,214,222,243,259,275,291,315,317,331,369,415,464,418,364,390],
+];
+
+// 女性人口
+const popF = [
+  [430,481,506,468,410,396,395,398,390,362,330,284,231,200,155,107,57,28],
+  [370,430,482,507,449,386,375,371,377,386,358,317,273,218,176,131,75,43],
+  [415,489,436,405,388,450,535,461,418,406,365,310,252,222,171,119,68,36],
+  [364,416,490,438,404,388,450,534,458,414,401,359,303,241,206,148,89,53],
+  [317,364,416,488,433,399,386,448,531,454,409,394,351,291,226,182,115,77],
+  [293,319,365,417,485,434,401,388,448,529,450,404,386,340,275,203,148,110],
+  [288,294,319,365,411,483,434,403,388,445,523,444,399,375,323,252,170,158],
+  [272,289,293,319,360,408,482,433,402,386,441,518,439,389,360,301,219,212],
+  [259,273,289,295,317,360,412,484,434,401,383,438,512,429,374,336,264,275],
+  [244,259,273,292,292,315,361,411,482,431,396,379,430,498,411,349,297,343],
+  [231,245,258,274,289,299,321,362,414,479,455,403,363,401,460,379,303,398],
+  [209,231,245,258,274,289,300,321,362,413,477,453,399,360,399,458,375,447],
+  [201,210,231,245,258,274,290,300,321,361,412,476,451,397,358,397,456,481],
+  [193,201,210,231,245,258,274,290,300,320,360,411,474,448,394,355,394,509],
+  [184,193,201,210,231,245,258,274,290,300,320,359,409,471,446,392,353,468],
+  [174,184,193,201,210,231,245,259,274,290,299,319,358,407,469,443,390,478],
+];
+
+// 社会保障給付費（兆円）
+// 出典: 社人研「社会保障費用統計」実績 / 2025以降は財政制度審議会資料ベース線形補間
+const costs = [3.5,11.8,24.8,35.7,47.4,64.7,78.1,88.9,105.2,116.8,132.2,140.0,149.0,158.5,168.0,175.0];
+const maxCost = Math.max(...costs);
+
+const pyrCanvas = document.getElementById('pyrCanvas');
+const costCanvas = document.getElementById('costCanvas');
+const pyrCtx = pyrCanvas.getContext('2d');
+const costCtx = costCanvas.getContext('2d');
+
+function resize() {
+  const pyrBox = pyrCanvas.parentElement;
+  const costBox = costCanvas.parentElement;
+  const pw = pyrBox.clientWidth - 32;
+  pyrCanvas.width = pw;
+  pyrCanvas.height = Math.min(420, Math.max(280, window.innerHeight * 0.55));
+  costCanvas.width = costBox.clientWidth - 32;
+  costCanvas.height = Math.min(240, Math.max(160, window.innerHeight * 0.28));
+}
+resize();
+window.addEventListener('resize', () => { resize(); draw(frame); });
+
+const C = {
+  bg:'#16161a', axis:'#3a3a42', grid:'#252528',
+  male:'#4a90c4', female:'#c4607a',
+  cost:'#e87b3a', costFill:'rgba(232,123,58,0.12)',
+  gold:'#c9a84c', goldDim:'#5a4820',
+  text:'#d4cfc5', textDim:'#6b6860'
+};
+
+function drawPyramid(ctx, fi) {
+  const W=ctx.canvas.width, H=ctx.canvas.height;
+  const pad={top:10,bottom:34,left:48,right:12};
+  const plotW=W-pad.left-pad.right, plotH=H-pad.top-pad.bottom;
+  const barH=plotH/A, halfW=plotW/2, cx=pad.left+halfW;
+  ctx.clearRect(0,0,W,H);
+
+  const mD=popM[fi], fD=popF[fi];
+  const maxVal=Math.max(...mD,...fD);
+  const sc=(halfW-4)/maxVal;
+
+  // grid
+  ctx.strokeStyle=C.grid; ctx.lineWidth=1;
+  for(let g=100;g<=600;g+=100){
+    const gx=g*sc; if(gx>halfW) break;
+    ctx.beginPath();
+    ctx.moveTo(cx+gx,pad.top); ctx.lineTo(cx+gx,H-pad.bottom);
+    ctx.moveTo(cx-gx,pad.top); ctx.lineTo(cx-gx,H-pad.bottom);
+    ctx.stroke();
+  }
+  ctx.strokeStyle=C.axis; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cx,pad.top); ctx.lineTo(cx,H-pad.bottom); ctx.stroke();
+
+  // bars
+  for(let i=0;i<A;i++){
+    const y=pad.top+(A-1-i)*barH+1, bh=barH-2;
+    ctx.globalAlpha=0.82;
+    ctx.fillStyle=C.male; ctx.fillRect(cx-mD[i]*sc,y,mD[i]*sc,bh);
+    ctx.fillStyle=C.female; ctx.fillRect(cx,y,fD[i]*sc,bh);
+    ctx.globalAlpha=1;
+  }
+
+  // age labels
+  ctx.fillStyle=C.textDim;
+  ctx.font=`${Math.max(8,barH*0.55)}px "DM Mono",monospace`;
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  for(let i=0;i<A;i++){
+    if(i%2===0) ctx.fillText(AGE_GROUPS[i],pad.left-4,pad.top+(A-1-i)*barH+barH/2);
+  }
+
+  // axis labels
+  ctx.fillStyle=C.textDim; ctx.font='9px "DM Mono",monospace';
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.fillText('←男性',pad.left+16,H-pad.bottom+4);
+  ctx.fillText('女性→',W-pad.right-20,H-pad.bottom+4);
+
+  // 65+ zone
+  const yTop65=pad.top+(A-13)*barH;
+  ctx.fillStyle='rgba(201,168,76,0.04)';
+  ctx.fillRect(pad.left,yTop65,plotW,H-pad.bottom-yTop65);
+  ctx.strokeStyle='rgba(201,168,76,0.18)'; ctx.lineWidth=1;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(pad.left,yTop65); ctx.lineTo(W-pad.right,yTop65); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(201,168,76,0.5)';
+  ctx.font='9px "DM Mono",monospace'; ctx.textAlign='left'; ctx.textBaseline='bottom';
+  ctx.fillText('65歳以上',pad.left+2,yTop65-1);
+
+  // 推計ラベル
+  if(YEARS[fi]>=2025){
+    ctx.fillStyle='rgba(201,168,76,0.4)';
+    ctx.font='9px "DM Mono",monospace'; ctx.textAlign='right'; ctx.textBaseline='top';
+    ctx.fillText('推計値',W-pad.right,pad.top);
+  }
+}
+
+function drawCost(ctx, fi) {
+  const W=ctx.canvas.width, H=ctx.canvas.height;
+  const pad={top:16,bottom:34,left:44,right:12};
+  const plotW=W-pad.left-pad.right, plotH=H-pad.top-pad.bottom;
+  const yMax=maxCost*1.15, xSc=plotW/(N-1), ySc=plotH/yMax;
+  ctx.clearRect(0,0,W,H);
+
+  // grid + y labels
+  ctx.strokeStyle=C.grid; ctx.lineWidth=1;
+  for(let v=0;v<=yMax;v+=50){
+    const gy=H-pad.bottom-v*ySc;
+    ctx.beginPath(); ctx.moveTo(pad.left,gy); ctx.lineTo(W-pad.right,gy); ctx.stroke();
+    ctx.fillStyle=C.textDim; ctx.font='9px "DM Mono",monospace';
+    ctx.textAlign='right'; ctx.textBaseline='middle';
+    ctx.fillText(v,pad.left-4,gy);
+  }
+
+  // 実績/推計境界
+  const si=YEARS.indexOf(2020);
+  if(si>=0){
+    const sx=pad.left+si*xSc;
+    ctx.strokeStyle='rgba(201,168,76,0.2)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(sx,pad.top); ctx.lineTo(sx,H-pad.bottom); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(201,168,76,0.3)'; ctx.font='8px "DM Mono",monospace';
+    ctx.textAlign='right'; ctx.textBaseline='top'; ctx.fillText('実績↑',sx-2,pad.top);
+    ctx.textAlign='left'; ctx.fillText('↑推計',sx+2,pad.top);
+  }
+
+  // axes
+  ctx.strokeStyle=C.axis; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad.left,pad.top); ctx.lineTo(pad.left,H-pad.bottom);
+  ctx.lineTo(W-pad.right,H-pad.bottom); ctx.stroke();
+
+  if(fi>0){
+    // fill
+    ctx.beginPath(); ctx.moveTo(pad.left,H-pad.bottom);
+    for(let i=0;i<=fi;i++) ctx.lineTo(pad.left+i*xSc,H-pad.bottom-costs[i]*ySc);
+    ctx.lineTo(pad.left+fi*xSc,H-pad.bottom); ctx.closePath();
+    ctx.fillStyle=C.costFill; ctx.fill();
+
+    // line
+    ctx.beginPath(); ctx.strokeStyle=C.cost; ctx.lineWidth=2.5; ctx.lineJoin='round';
+    for(let i=0;i<=fi;i++){
+      const x=pad.left+i*xSc, y=H-pad.bottom-costs[i]*ySc;
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // dot
+    const cx2=pad.left+fi*xSc, cy2=H-pad.bottom-costs[fi]*ySc;
+    ctx.beginPath(); ctx.arc(cx2,cy2,4,0,Math.PI*2);
+    ctx.fillStyle=C.cost; ctx.fill();
+    ctx.fillStyle=C.cost; ctx.font='bold 11px "DM Mono",monospace';
+    ctx.textAlign=fi>N*0.7?'right':'left'; ctx.textBaseline='bottom';
+    ctx.fillText(`${costs[fi].toFixed(1)}兆`,cx2+(fi>N*0.7?-8:8),cy2-4);
+  }
+
+  // x labels
+  ctx.fillStyle=C.textDim; ctx.font='9px "DM Mono",monospace';
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  [1970,1980,1990,2000,2010,2020,2035,2045].forEach(yr=>{
+    const i=YEARS.indexOf(yr); if(i<0)return;
+    const x=pad.left+i*xSc;
+    ctx.fillText(yr,x,H-pad.bottom+4);
+    ctx.strokeStyle=C.axis; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x,H-pad.bottom); ctx.lineTo(x,H-pad.bottom+3); ctx.stroke();
+  });
+
+  // y axis label
+  ctx.save(); ctx.translate(10,H/2); ctx.rotate(-Math.PI/2);
+  ctx.fillStyle=C.textDim; ctx.font='9px "DM Mono",monospace';
+  ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('兆円',0,0);
+  ctx.restore();
+}
+
+function updateStats(fi){
+  const mD=popM[fi], fD=popF[fi];
+  const total=mD.reduce((a,b)=>a+b)+fD.reduce((a,b)=>a+b);
+  let old65=0, working=0;
+  for(let i=0;i<A;i++){
+    const v=mD[i]+fD[i];
+    if(i>=13) old65+=v;
+    if(i>=3&&i<=12) working+=v;
+  }
+  document.getElementById('statCost').textContent=costs[fi].toFixed(1);
+  document.getElementById('statOld').textContent=`${(old65/total*100).toFixed(1)}%`;
+  document.getElementById('statRatio').textContent=working>0?(old65/working).toFixed(2):'—';
+  document.getElementById('yearDisplay').textContent=YEARS[fi];
+}
+
+let frame=0, playing=false, lastTime=0;
+function draw(f){ drawPyramid(pyrCtx,f); drawCost(costCtx,f); updateStats(f); }
+function getInterval(){ return 1100-parseInt(document.getElementById('speedSlider').value)*100; }
+function step(ts){
+  if(!playing)return;
+  if(ts-lastTime>getInterval()){ lastTime=ts; frame=(frame+1)%N; draw(frame);
+    if(frame===N-1){playing=false;document.getElementById('playBtn').textContent='▶ PLAY';return;} }
+  requestAnimationFrame(step);
+}
+document.getElementById('playBtn').addEventListener('click',()=>{
+  if(frame>=N-1){frame=0;draw(frame);}
+  playing=!playing;
+  document.getElementById('playBtn').textContent=playing?'⏸ PAUSE':'▶ PLAY';
+  if(playing)requestAnimationFrame(step);
+});
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  playing=false;frame=0;document.getElementById('playBtn').textContent='▶ PLAY';draw(frame);
+});
+draw(0);
+</script>
+</body>
+</html>
